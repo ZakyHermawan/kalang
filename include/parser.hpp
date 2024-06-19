@@ -1,7 +1,8 @@
 #include <string>
 #include <fstream>
 
-enum Token {
+enum Token
+{
   tok_start,
   tok_eof,
   tok_def,
@@ -11,7 +12,8 @@ enum Token {
   tok_binop,
 };
 
-class Parser {
+class Parser
+{
 private:
   std::string m_identifierStr;
   int m_numVal;
