@@ -1,85 +1,456 @@
 #include "parser.hpp"
+#include "helper.hpp"
+#include "ast.hpp"
+#include "token.hpp"
+#include <algorithm>
+#include <cctype>
+#include <cstdio>
+#include <cstdlib>
+#include <map>
+#include <memory>
+#include <string>
+#include <vector>
+
 #include <iostream>
 #include <cmath>
+#include <sstream>
+#include <fstream>
 
-Parser::Parser(std::string& filename)
-  : m_eof_reached(0), m_next_token(tok_start)
+Parser::Parser()
+  : m_eofReached(0), m_nextToken(tok_start), m_nextChar(' '),
+  m_curr_idx(0), m_curr_token(tok_start)
 {
-  m_file.open(filename, std::fstream::in);
-  if(m_file.fail())
+  m_binopPrecedence[tok_less] = 10;
+  m_binopPrecedence[tok_plus] = 20;
+  m_binopPrecedence[tok_min]  = 20;
+  m_binopPrecedence[tok_mult] = 40;
+}
+
+std::unique_ptr<PrototypeAST> Parser::parsePrototype()
+{
+  if(m_curr_token != tok_identifier)
   {
-    fprintf(stderr, "failed to open file\n");
+    printf("Error: Expected function name in prototype\n");
+    return nullptr;
   }
-  m_file.get(m_next_char);
-  if(m_file.eof())
+  std::string functionName = m_identifierStr;
+  advanceToken(); // consume function name
+  if(m_curr_token != tok_open_paren)
   {
-    m_eof_reached = 1;
+    printf("Error: Expected ( after function name in prototype\n");
+    return nullptr;
   }
-  while(m_eof_reached == 0 and m_next_token != tok_eof)
+  advanceToken(); // consume (
+  std::vector<std::string> argNames;
+  while(m_curr_token == tok_identifier)
   {
-    if(m_file.eof())
+    argNames.push_back(m_identifierStr);
+    advanceToken(); // consume argument name
+    if(m_curr_token == tok_comma)
     {
-      break;
+      advanceToken();
     }
-    m_next_token = gettok();
+  }
+  if(m_curr_token != tok_close_paren)
+  {
+    printf("Error: Expected ) after function name in prototype\n");
+    return nullptr;
+  }
+  advanceToken(); // consume )
+
+  return std::make_unique<PrototypeAST>(functionName, std::move(argNames));
+}
+
+int Parser::getTokPrec()
+{
+  if(!isascii(m_curr_token))
+  {
+    printf("Could not accept non ascii operator\n");
+    return -1;
+  }
+  int prec = m_binopPrecedence[m_curr_token];
+  if(prec <= 0)
+  {
+    return -1;
+  }
+  return prec;
+}
+
+std::unique_ptr<ExprAST> Parser::parseParenExpr()
+{
+  advanceToken(); // consume (
+  auto expr = parseExpression();
+  if(nullptr == expr)
+  {
+    return nullptr;
+  }
+
+  if(m_curr_token != tok_close_paren)
+  {
+    printf("Error: Expected )\n");
+    return nullptr;
+  }
+  advanceToken(); // consume )
+  return std::move(expr);
+}
+
+// identifierExpr := identifier | identifier '(' expression* ')'
+std::unique_ptr<ExprAST> Parser::parseIdentifierExpr()
+{
+  std::string identifier = m_identifierStr;
+  advanceToken(); // consume identifier
+
+  if(m_curr_token != tok_open_paren) // just identifier
+  {
+    return std::make_unique<VariableExprAST>(identifier);
+  }
+
+  advanceToken(); // consume (
+  std::vector<std::unique_ptr<ExprAST>> args;
+  if(m_curr_token != tok_open_paren)
+  {
+    while(1)
+    {
+      auto arg = parseExpression();
+      if(arg)
+      {
+        args.push_back(std::move(arg));
+      }
+      else
+      {
+        return nullptr;
+      }
+
+      if(m_curr_token == tok_close_paren)
+      {
+        break;
+      }
+      if(m_curr_token != tok_comma)
+      {
+        printf("Error: Expected after comma after argument\n");
+        return nullptr;
+      }
+      advanceToken();
+    }
+  }
+  advanceToken(); // consume )
+  return std::make_unique<CallExprAST>(identifier, std::move(args));
+}
+
+std::unique_ptr<ExprAST> Parser::parseNumberExpr()
+{
+  auto numberExpr = std::make_unique<NumberExprAST>(m_numVal);
+  advanceToken(); // consume number
+  return std::move(numberExpr);
+}
+
+std::unique_ptr<ExprAST> Parser::parsePrimary()
+{
+  switch(m_curr_token)
+  {
+    case tok_identifier:
+      return parseIdentifierExpr();
+    case tok_number:
+      return parseNumberExpr();
+    case tok_open_paren:
+      return parseParenExpr();
+    default:
+      return nullptr;
   }
 }
 
-Token Parser::gettok()
+std::unique_ptr<ExprAST> Parser::parseBinOpRHS(int exprPrec, std::unique_ptr<ExprAST> lhs)
 {
-  while(1) 
+  while(true)
   {
-    if(m_file.eof())
+    int currPrec = getTokPrec();
+    if(currPrec < exprPrec )
     {
-      m_eof_reached = 1;
-      return tok_eof;
+      return lhs;
     }
-    else if(m_next_char == '+' or m_next_char == '-' or m_next_char == '*')
+
+    Token binop = m_curr_token;
+    advanceToken(); // eat operator
+
+    auto rhs = parsePrimary();
+    if(nullptr == rhs)
     {
-      printf("%c\n", m_next_char);
-      m_file.get(m_next_char);
-      return tok_binop;
+      return nullptr;
     }
-    else if(isdigit(m_next_char))
+
+    int nextPrec = getTokPrec();
+    if(currPrec < nextPrec)
     {
-      m_numVal = 0;
-      do
+      rhs = parseBinOpRHS(currPrec + 1, std::move(rhs));
+      if(nullptr == rhs)
       {
-        m_numVal = (m_next_char - '0') + m_numVal * 10;
-        m_file.get(m_next_char);
-      } while(std::isdigit(m_next_char) and !m_file.eof());
-      printf("%d\n", m_numVal);
-      return tok_number;
-    }
-    else if(isalpha(m_next_char))
-    {
-      m_identifierStr = "";
-      do
-      {
-        m_identifierStr.push_back(m_next_char);
-        m_file.get(m_next_char);
-      } while(isalnum(m_next_char) and !m_file.eof());
-      if(m_identifierStr == "def")
-      {
-        printf("%s\n", m_identifierStr.c_str());
-        return tok_def;
+        return nullptr;
       }
-      else if(m_identifierStr == "extern")
-      {
-        printf("%s\n", m_identifierStr.c_str());
-        return tok_extern;
-      }
-      printf("%s\n", m_identifierStr.c_str());
-      return tok_identifier;
     }
-    else if(m_next_char == '#')
-    {
-      do
-      {
-        m_file.get(m_next_char);
-      } while(!m_file.eof() and m_next_char != '\n');
-    }
-    m_file.get(m_next_char);
+    lhs = std::make_unique<BinaryExprAST>(std::move(lhs), binop, std::move(rhs));
   }
-  return tok_eof;
+}
+
+std::unique_ptr<ExprAST> Parser::parseExpression()
+{
+  auto lhs = parsePrimary();
+  if(nullptr == lhs)
+  {
+    return nullptr;
+  }
+  return parseBinOpRHS(0, std::move(lhs));
+}
+
+void Parser::read_line()
+{
+  getline(std::cin, m_source);
+}
+
+std::string Parser::get_source()
+{
+  return m_source;
+}
+
+void Parser::skip_whitespace()
+{
+  while(isspace(m_source[m_curr_idx]))
+  {
+    m_curr_idx++;
+  }
+}
+
+int Parser::scan_int()
+{
+  char curr_char = m_source[m_curr_idx];
+  int result = 0;
+  while(isdigit(curr_char))
+  {
+    result = result * 10 + curr_char - '0';
+    m_curr_idx++;
+    if(m_curr_idx >= m_source.length() || isspace(m_source[m_curr_idx]))
+    {
+      break;
+    }
+    curr_char = m_source[m_curr_idx];
+  }
+  return result;
+}
+
+// entry point
+void Parser::parse()
+{
+  m_curr_token = advanceToken();
+  while(m_curr_token != tok_eof)
+  {
+    if(m_curr_token == tok_def)
+    {
+      if(auto fAst = parseDefinition())
+      {
+        if(auto* fIR = fAst->codegen())
+        {
+          // printf("Parsed function definition");
+          fIR->print(llvm::errs());
+          printf("\n");
+        }
+        // printf("parsed definisi\n");
+      }
+      else
+      {
+        // errror
+        advanceToken();
+      }
+    }
+    else if(m_curr_token == tok_decl)
+    {
+      if(auto protoAst = parseDeclaration())
+      {
+        if(auto* fIR = protoAst->codegen())
+        {
+          fIR->print(llvm::errs());
+          printf("\n");
+        }
+        // printf("parsed deklarasi\n");
+      }
+      else
+      {
+        advanceToken();
+      }
+    }
+    else if(m_curr_token == tok_semicolon)
+    {
+      advanceToken();
+    }
+    else
+    {
+      if(auto fAst = parseTopLevel())
+      {
+        if(auto* fIR = fAst->codegen())
+        {
+          fIR->print(llvm::errs());
+          printf("\n");
+        }
+        // printf("Top Level parsed\n");
+      }
+      else
+      {
+        advanceToken();
+      }
+    }
+  }
+}
+
+void Parser::read_file(const char* fileName)
+{
+  std::ifstream sourceFile;
+  sourceFile.open(fileName);
+  if(sourceFile.is_open())
+  {
+    std::stringstream ss;
+    ss << sourceFile.rdbuf();
+    m_source = ss.str();
+  }
+}
+
+Token Parser::getCurrToken()
+{
+  return m_curr_token;
+}
+
+Token Parser::advanceToken()
+{
+  // avoid overflow
+  if(m_curr_idx >= m_source.length())
+  {
+    m_curr_token = tok_eof;
+    return tok_eof;
+  }
+  char curr_char;
+  std::string identifier;
+
+  skip_whitespace();
+  curr_char = m_source[m_curr_idx];
+
+  // every m_current_idx is incremented after scanning the token
+  if(isdigit(curr_char))
+  {
+    m_numVal = scan_int();
+    // printf("int scanned: %d\n", res);
+    m_curr_token = tok_number;
+  }
+  else if(isalpha(curr_char))
+  {
+    do{
+      curr_char = m_source[m_curr_idx];
+      identifier += curr_char;
+      ++m_curr_idx;
+    } while( m_curr_idx < m_source.length() && isalnum(m_source[m_curr_idx]));
+    if(identifier == "fungsi")
+    {
+      // printf("Keyword fungsi scanned\n");
+      m_curr_token = tok_def;
+    }
+    else if(identifier == "deklarasi")
+    {
+      // printf("Keyword deklarasi scanned\n");
+      m_curr_token = tok_decl;
+    }
+    else
+    {
+      // printf("identifier scanned: %s\n", identifier.c_str());
+      m_identifierStr = identifier;
+      m_curr_token = tok_identifier;
+    }
+  }
+  else if(curr_char == '+')
+  {
+    // printf("PLUS operator scanned\n");
+    ++m_curr_idx;
+    m_curr_token = tok_plus;
+  }
+  else if(curr_char == '-')
+  {
+    // printf("MIN operator scanned\n");
+    ++m_curr_idx;
+    m_curr_token = tok_min;
+  }
+  else if(curr_char == '*')
+  {
+    // printf("MULT operator scanned\n");
+    ++m_curr_idx;
+    m_curr_token = tok_mult;
+  }
+  else if(curr_char == '<')
+  {
+    // printf("< scanned\n");
+    ++m_curr_idx;
+    m_curr_token = tok_less;
+  }
+  else if(curr_char == '(')
+  {
+    // printf("( scanned\n");
+    ++m_curr_idx;
+    m_curr_token = tok_open_paren;
+  }
+  else if(curr_char == ')')
+  {
+    // printf(") scanned\n");
+    ++m_curr_idx;
+    m_curr_token = tok_close_paren;
+  }
+  else if(curr_char == ',')
+  {
+    // printf(", scanned\n");
+    ++m_curr_idx;
+    m_curr_token = tok_comma;
+  }
+  else if(curr_char == ';')
+  {
+    // printf("semicolon scanned\n");
+    ++m_curr_idx;
+    m_curr_token = tok_semicolon;
+  }
+  else if(curr_char == '\n')
+  {
+  }
+  else{
+    if(m_curr_idx >= m_source.length())
+    {
+      m_curr_token = tok_eof;
+    }
+    ++m_curr_idx;
+    m_curr_token = tok_notdef;
+  }
+  return m_curr_token;
+}
+
+std::unique_ptr<FuncAST> Parser::parseDefinition()
+{
+  advanceToken(); // consume definisi
+  auto prototype = parsePrototype();
+  if(nullptr == prototype)
+  {
+    return nullptr;
+  }
+  auto expr = parseExpression();
+  if(expr)
+  {
+    return std::make_unique<FuncAST>(std::move(prototype), std::move(expr));
+  }
+  return nullptr;
+}
+std::unique_ptr<PrototypeAST> Parser::parseDeclaration()
+{
+  advanceToken(); // consume deklarasi
+  return parsePrototype();
+}
+std::unique_ptr<FuncAST> Parser::parseTopLevel()
+{
+  auto expr = parseExpression();
+  if(expr)
+  {
+    // make anonymous prototype
+    auto prototype = std::make_unique<PrototypeAST>("", std::vector<std::string>());
+    return std::make_unique<FuncAST>(std::move(prototype), std::move(expr));
+  }
+  return nullptr;
 }
