@@ -16,6 +16,8 @@
 #include <sstream>
 #include <fstream>
 
+#include "runtime.hpp"
+
 Parser::Parser()
   : m_eofReached(0), m_nextToken(tok_start), m_nextChar(' '),
   m_curr_idx(0), m_curr_token(tok_start)
@@ -251,6 +253,10 @@ void Parser::parse()
           // printf("Parsed function definition");
           fIR->print(llvm::errs());
           printf("\n");
+          ExitOnErr(TheJIT->addModule(
+            llvm::orc::ThreadSafeModule(std::move(TheModule), std::move(TheContext))
+          ));
+          InitializeModule();
         }
         // printf("parsed definisi\n");
       }
@@ -266,10 +272,11 @@ void Parser::parse()
       {
         if(auto* fIR = protoAst->codegen())
         {
+          // printf("parsed deklarasi\n");
           fIR->print(llvm::errs());
           printf("\n");
+          FunctionProtos[protoAst->getName()] = std::move(protoAst);
         }
-        // printf("parsed deklarasi\n");
       }
       else
       {
@@ -288,6 +295,19 @@ void Parser::parse()
         {
           fIR->print(llvm::errs());
           printf("\n");
+          auto RT = TheJIT->getMainJITDylib().createResourceTracker();
+          auto TSM = llvm::orc::ThreadSafeModule(std::move(TheModule), std::move(TheContext));
+          ExitOnErr(TheJIT->addModule(std::move(TSM), RT));
+          InitializeModule();
+          auto ExprSymbol = ExitOnErr(TheJIT->lookup("__anon_expr"));
+          assert(ExprSymbol && "Function not found");
+
+          // Get the symbol's address and cast it to the right type (takes no
+          // arguments, returns an int) so we can call it as a native function.
+          int (*FP)() = (int (*)())(intptr_t)ExprSymbol.getAddress();
+          fprintf(stderr, "Evaluated to %d\n", FP());
+          ExitOnErr(RT->remove());
+
         }
         // printf("Top Level parsed\n");
       }
@@ -449,7 +469,7 @@ std::unique_ptr<FuncAST> Parser::parseTopLevel()
   if(expr)
   {
     // make anonymous prototype
-    auto prototype = std::make_unique<PrototypeAST>("", std::vector<std::string>());
+    auto prototype = std::make_unique<PrototypeAST>("__anon_expr", std::vector<std::string>());
     return std::make_unique<FuncAST>(std::move(prototype), std::move(expr));
   }
   return nullptr;

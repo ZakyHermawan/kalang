@@ -6,6 +6,7 @@
 #include <fstream>
 #include <unordered_map>
 
+#include "jit.hpp"
 
 class Parser
 {

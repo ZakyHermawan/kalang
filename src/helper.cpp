@@ -1,25 +1,6 @@
 #include "helper.hpp"
 
 #include <memory>
-#include <stdexcept>
-
-std::unique_ptr<ExprAST> logErr(const char* str, ErrorCode errCode) {
-  if(errCode == syntaxErr)
-  {
-    fprintf(stderr, "Syntax Error: %s\n", str);
-  }
-  else
-  {
-    fprintf(stderr, "Error: %s\n", str);
-  }
-  return nullptr;
-}
-
-std::unique_ptr<PrototypeAST> logErrP(const char* str, ErrorCode errCode) {
-  fprintf(stderr, "Error on function prototype!\n");
-  logErr(str, errCode);
-  return nullptr;
-}
 
 template<typename... Args>
 std::string string_format(const std::string& format, Args... args)

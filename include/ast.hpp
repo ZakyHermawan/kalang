@@ -98,3 +98,4 @@ public:
     : m_proto(std::move(proto)), m_body(std::move(body)) {}
   llvm::Function* codegen();
 };
+
