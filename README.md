@@ -5,6 +5,7 @@ Kalang (dibaca kaleng), adalah sebuah bahasa pemrograman
 
 Features:
 * Function
+* Just In Time Execution
 
 dependency: LLVM-14
 how to build:
@@ -24,9 +25,10 @@ you can see the generated assembly with objdump or gdb
 
 Make sure to have main function if you want to compile it to executable with clang
 
-Test Program:
-![alt text](image-1.png)
+REPL:
 
-Output:
-![alt text](image.png)
+![alt text](image-2.png)
 
+File:
+
+![alt text](image-3.png)
