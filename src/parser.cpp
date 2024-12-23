@@ -251,7 +251,7 @@ void Parser::parse()
         if(auto* fIR = fAst->codegen())
         {
           // printf("Parsed function definition");
-          fIR->print(llvm::errs());
+          // fIR->print(llvm::errs());
           printf("\n");
           ExitOnErr(TheJIT->addModule(
             llvm::orc::ThreadSafeModule(std::move(TheModule), std::move(TheContext))
@@ -273,7 +273,7 @@ void Parser::parse()
         if(auto* fIR = protoAst->codegen())
         {
           // printf("parsed deklarasi\n");
-          fIR->print(llvm::errs());
+          // fIR->print(llvm::errs());
           printf("\n");
           FunctionProtos[protoAst->getName()] = std::move(protoAst);
         }
@@ -293,8 +293,8 @@ void Parser::parse()
       {
         if(auto* fIR = fAst->codegen())
         {
-          fIR->print(llvm::errs());
-          printf("\n");
+          // fIR->print(llvm::errs());
+          // printf("\n");
           auto RT = TheJIT->getMainJITDylib().createResourceTracker();
           auto TSM = llvm::orc::ThreadSafeModule(std::move(TheModule), std::move(TheContext));
           ExitOnErr(TheJIT->addModule(std::move(TSM), RT));

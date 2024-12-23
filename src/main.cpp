@@ -19,7 +19,6 @@ static void repl()
       printf("\n");
       break;
     }
-    std::string source_code = parser.get_source();
     parser.parse();
   }
   return;
