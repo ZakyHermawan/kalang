@@ -42,11 +42,15 @@ llvm::Value *CallExprAST::codegen()
   // Look up the name in the global module table.
   llvm::Function *CalleeF = getFunction(m_callee);
   if (!CalleeF)
+  {
     printf("Unknown function referenced\n");
+  }
 
   // If argument mismatch error.
   if (CalleeF->arg_size() != m_args.size())
+  {
     printf("Incorrect # arguments passed");
+  }
 
   std::vector<llvm::Value *> ArgsV;
   for (unsigned i = 0, e = m_args.size(); i != e; ++i) {

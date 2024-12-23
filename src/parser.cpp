@@ -109,7 +109,7 @@ std::unique_ptr<ExprAST> Parser::parseIdentifierExpr()
 
   advanceToken(); // consume (
   std::vector<std::unique_ptr<ExprAST>> args;
-  if(m_curr_token != tok_open_paren)
+  if(m_curr_token != tok_close_paren)
   {
     while(1)
     {
@@ -132,7 +132,7 @@ std::unique_ptr<ExprAST> Parser::parseIdentifierExpr()
         printf("Error: Expected after comma after argument\n");
         return nullptr;
       }
-      advanceToken();
+      advanceToken(); // eat ,
     }
   }
   advanceToken(); // consume )
