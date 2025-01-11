@@ -12,11 +12,12 @@
 #include <llvm/Passes/StandardInstrumentations.h>
 #include <llvm/Support/Error.h>
 #include <llvm/IR/Function.h>
+#include <llvm/Transforms/Utils/Mem2Reg.h>
 
 extern std::unique_ptr<llvm::LLVMContext> TheContext;
 extern std::unique_ptr<llvm::Module> TheModule;
 extern std::unique_ptr<llvm::IRBuilder<>> Builder;
-extern std::map<std::string, llvm::Value *> NamedValues;
+extern std::map<std::string, llvm::AllocaInst *> NamedValues;
 extern std::shared_ptr<llvm::orc::KalangJIT> TheJIT;
 extern std::unique_ptr<llvm::FunctionPassManager> TheFPM;
 extern std::unique_ptr<llvm::LoopAnalysisManager> TheLAM;
@@ -30,4 +31,5 @@ extern llvm::ExitOnError ExitOnErr;
 
 void InitializeModule();
 llvm::Function* getFunction(std::string Name);
+llvm::AllocaInst* CreateEntryBlockAlloca(llvm::Function* TheFunction, llvm::StringRef varName);
 

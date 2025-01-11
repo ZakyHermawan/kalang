@@ -22,6 +22,9 @@ Parser::Parser()
   : m_eofReached(0), m_nextToken(tok_start), m_nextChar(' '),
   m_curr_idx(0), m_curr_token(tok_start)
 {
+  //Define ':' for sequencing: as a low-precedence operator that ignores operands
+  // m_binopPrecedence[tok_colon] = 1;
+  m_binopPrecedence[tok_assignment] = 2;
   m_binopPrecedence[tok_less] = 10;
   m_binopPrecedence[tok_plus] = 20;
   m_binopPrecedence[tok_min]  = 20;
@@ -146,6 +149,169 @@ std::unique_ptr<ExprAST> Parser::parseNumberExpr()
   return std::move(numberExpr);
 }
 
+/// ifexpr ::= 'if' expression 'then' expression 'else' expression
+std::unique_ptr<ExprAST> Parser::parseIfExpr()
+{
+  advanceToken(); // eat if
+  auto cond = parseExpression();
+
+  if(m_curr_token != tok_then)
+  {
+    printf("Error: Expected then after if condition\n");
+    return nullptr;
+  }
+  advanceToken(); // eat then
+
+  auto then = parseExpression();
+  if(m_curr_token != tok_else)
+  {
+    printf("Error: Expected else\n");
+    return nullptr;
+  }
+  advanceToken(); // eat else
+  auto else_ = parseExpression();
+  if(!else_)
+  {
+    return nullptr;
+  }
+  return std::make_unique<IfExprAST>(std::move(cond), std::move(then), std::move(else_)); 
+}
+
+/// forexpr ::= 'for' identifier '=' expr ',' expr (',' expr)? 'in' expression
+std::unique_ptr<ExprAST> Parser::parseForExpr()
+{
+  advanceToken(); // eat for
+  if(m_curr_token != tok_identifier)
+  {
+    printf("Error: Expected identifier\n");
+    return nullptr;
+  }
+
+  std::string idName = m_identifierStr;
+  advanceToken(); // eat identifier
+  
+  if(m_curr_token != tok_assignment)
+  {
+    printf("Error: Expected '=' operator\n");
+    return nullptr;
+  }
+  advanceToken(); // eat =
+
+  auto start = parseExpression();
+  if(!start)
+  {
+    return nullptr;
+  }
+
+  if(m_curr_token != tok_semicolon)
+  {
+    printf("Error: Expected semi colon\n");
+    return nullptr;
+  }
+  advanceToken(); // eat ;
+
+  auto end = parseExpression();
+  if(!end)
+  {
+    return nullptr;
+  }
+
+  std::unique_ptr<ExprAST> step;
+  if(m_curr_token == tok_semicolon)
+  {
+    advanceToken(); // eat ;
+    step = parseExpression();
+    if(!step)
+    {
+      return nullptr;
+    }
+  }
+
+  if(m_curr_token != tok_then)
+  {
+    printf("Error: Expected then\n");
+    return nullptr;
+  }
+  advanceToken(); // eat then
+
+  auto body = parseExpression();
+  if(!body)
+  {
+    return nullptr;
+  }
+  return std::make_unique<ForExprAST>(
+    idName, std::move(start), std::move(end), std::move(step), std::move(body)
+  );
+}
+
+/// varexpr ::= 'var' identifier ('=' expression)?
+//                    (',' identifier ('=' expression)?)* 'in' expression
+
+std::unique_ptr<ExprAST> Parser::parseVarExpr()
+{
+  advanceToken(); // eat var
+  std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> varNames;
+
+  if(m_curr_token != tok_identifier)
+  {
+    printf("Error: Expected identifier after var\n");
+    return nullptr;
+  }
+  while(1)
+  {
+    std::string varName = m_identifierStr;
+    advanceToken(); // eat identifier
+
+    std::unique_ptr<ExprAST> initialValue = nullptr;
+    if(m_curr_token == tok_assignment)
+    {
+      advanceToken(); // eat =
+      initialValue = parseExpression();
+      if(!initialValue)
+      {
+        return nullptr;
+      }
+    }
+
+    varNames.push_back(std::make_pair(varName, std::move(initialValue)));
+
+    if(m_curr_token != tok_comma)
+    {
+      break;
+    }
+    advanceToken(); // eat ,
+    
+    if(m_curr_token != tok_identifier)
+    {
+      printf("Error: Expected identifier list after var");
+      return nullptr;
+    }
+  }
+
+  if(m_curr_token != tok_in)
+  {
+    printf("Error: Expected in after var\n");
+    return nullptr;
+  }
+  advanceToken(); // eat in
+
+  auto body = parseExpression();
+  if(!body)
+  {
+    return nullptr;
+  }
+
+  if(m_curr_token != tok_colon)
+  {
+    printf("Error: Expected colon\n");
+    return nullptr;
+  }
+  advanceToken(); // eat :
+
+  auto retVal = parseExpression();
+  return std::make_unique<VarExprAST>(std::move(varNames), std::move(body), std::move(retVal));
+}
+
 std::unique_ptr<ExprAST> Parser::parsePrimary()
 {
   switch(m_curr_token)
@@ -156,6 +322,12 @@ std::unique_ptr<ExprAST> Parser::parsePrimary()
       return parseNumberExpr();
     case tok_open_paren:
       return parseParenExpr();
+    case tok_if:
+      return parseIfExpr();
+    case tok_for:
+      return parseForExpr();
+    case tok_var:
+      return parseVarExpr();
     default:
       return nullptr;
   }
@@ -235,7 +407,7 @@ int Parser::scan_int()
     }
     curr_char = m_source[m_curr_idx];
   }
-  return result;
+  return result;;
 }
 
 // entry point
@@ -250,15 +422,13 @@ void Parser::parse()
       {
         if(auto* fIR = fAst->codegen())
         {
-          // printf("Parsed function definition");
-          // fIR->print(llvm::errs());
+          fIR->print(llvm::errs());
           printf("\n");
           ExitOnErr(TheJIT->addModule(
             llvm::orc::ThreadSafeModule(std::move(TheModule), std::move(TheContext))
           ));
           InitializeModule();
         }
-        // printf("parsed definisi\n");
       }
       else
       {
@@ -272,8 +442,6 @@ void Parser::parse()
       {
         if(auto* fIR = protoAst->codegen())
         {
-          // printf("parsed deklarasi\n");
-          // fIR->print(llvm::errs());
           printf("\n");
           FunctionProtos[protoAst->getName()] = std::move(protoAst);
         }
@@ -293,8 +461,6 @@ void Parser::parse()
       {
         if(auto* fIR = fAst->codegen())
         {
-          // fIR->print(llvm::errs());
-          // printf("\n");
           auto RT = TheJIT->getMainJITDylib().createResourceTracker();
           auto TSM = llvm::orc::ThreadSafeModule(std::move(TheModule), std::move(TheContext));
           ExitOnErr(TheJIT->addModule(std::move(TSM), RT));
@@ -309,7 +475,6 @@ void Parser::parse()
           ExitOnErr(RT->remove());
 
         }
-        // printf("Top Level parsed\n");
       }
       else
       {
@@ -354,7 +519,6 @@ Token Parser::advanceToken()
   if(isdigit(curr_char))
   {
     m_numVal = scan_int();
-    // printf("int scanned: %d\n", res);
     m_curr_token = tok_number;
   }
   else if(isalpha(curr_char))
@@ -366,68 +530,91 @@ Token Parser::advanceToken()
     } while( m_curr_idx < m_source.length() && isalnum(m_source[m_curr_idx]));
     if(identifier == "fungsi")
     {
-      // printf("Keyword fungsi scanned\n");
       m_curr_token = tok_def;
     }
     else if(identifier == "deklarasi")
     {
-      // printf("Keyword deklarasi scanned\n");
       m_curr_token = tok_decl;
+    }
+    else if(identifier == "if")
+    {
+      m_curr_token = tok_if;
+    }
+    else if(identifier == "then")
+    {
+      m_curr_token = tok_then;
+    }
+    else if(identifier == "else")
+    {
+      m_curr_token = tok_else;
+    }
+    else if(identifier == "for")
+    {
+      m_curr_token = tok_for;
+    }
+    else if(identifier == "in")
+    {
+      m_curr_token = tok_in;
+    }
+    else if(identifier == "var")
+    {
+      m_curr_token = tok_var;
     }
     else
     {
-      // printf("identifier scanned: %s\n", identifier.c_str());
       m_identifierStr = identifier;
       m_curr_token = tok_identifier;
     }
   }
   else if(curr_char == '+')
   {
-    // printf("PLUS operator scanned\n");
     ++m_curr_idx;
     m_curr_token = tok_plus;
   }
   else if(curr_char == '-')
   {
-    // printf("MIN operator scanned\n");
     ++m_curr_idx;
     m_curr_token = tok_min;
   }
   else if(curr_char == '*')
   {
-    // printf("MULT operator scanned\n");
     ++m_curr_idx;
     m_curr_token = tok_mult;
   }
+  else if(curr_char == '=')
+  {
+    ++m_curr_idx;
+    m_curr_token = tok_assignment;
+  }
   else if(curr_char == '<')
   {
-    // printf("< scanned\n");
     ++m_curr_idx;
     m_curr_token = tok_less;
   }
   else if(curr_char == '(')
   {
-    // printf("( scanned\n");
     ++m_curr_idx;
     m_curr_token = tok_open_paren;
   }
   else if(curr_char == ')')
   {
-    // printf(") scanned\n");
     ++m_curr_idx;
     m_curr_token = tok_close_paren;
   }
   else if(curr_char == ',')
   {
-    // printf(", scanned\n");
     ++m_curr_idx;
     m_curr_token = tok_comma;
   }
   else if(curr_char == ';')
   {
-    // printf("semicolon scanned\n");
     ++m_curr_idx;
     m_curr_token = tok_semicolon;
+  }
+  else if(curr_char == ':')
+  {
+    ++m_curr_idx;
+    m_curr_token = tok_colon;
   }
   else if(curr_char == '\n')
   {
@@ -474,3 +661,4 @@ std::unique_ptr<FuncAST> Parser::parseTopLevel()
   }
   return nullptr;
 }
+

@@ -5,7 +5,7 @@
 std::unique_ptr<llvm::LLVMContext> TheContext;
 std::unique_ptr<llvm::Module> TheModule;
 std::unique_ptr<llvm::IRBuilder<>> Builder;
-std::map<std::string, llvm::Value *> NamedValues;
+std::map<std::string, llvm::AllocaInst* > NamedValues;
 std::shared_ptr<llvm::orc::KalangJIT> TheJIT;
 std::unique_ptr<llvm::FunctionPassManager> TheFPM;
 std::unique_ptr<llvm::LoopAnalysisManager> TheLAM;
@@ -32,10 +32,13 @@ void InitializeModule() {
   TheCGAM = std::make_unique<llvm::CGSCCAnalysisManager>();
   TheMAM = std::make_unique<llvm::ModuleAnalysisManager>();
   ThePIC = std::make_unique<llvm::PassInstrumentationCallbacks>();
-  TheSI = std::make_unique<llvm::StandardInstrumentations>(true, true);
+  llvm::PrintPassOptions DefaultPrintPassOpts;
+  TheSI = std::make_unique<llvm::StandardInstrumentations>(true, true, DefaultPrintPassOpts);
   TheSI->registerCallbacks(*ThePIC, TheFAM.get());
 
   // Add transform passes.
+  // Promote Allocas to registers
+  TheFPM->addPass(llvm::PromotePass());
   // Do simple "peephole" optimizations and bit-twiddling optzns.
   TheFPM->addPass(llvm::InstCombinePass());
   // Reassociate expressions.
@@ -65,5 +68,11 @@ llvm::Function* getFunction(std::string Name) {
 
   // If no existing prototype exists, return null.
   return nullptr;
+}
+
+llvm::AllocaInst* CreateEntryBlockAlloca(llvm::Function* TheFunction, llvm::StringRef varName)
+{
+  llvm::IRBuilder<> Tmp(&TheFunction->getEntryBlock(), TheFunction->getEntryBlock().begin());
+  return Tmp.CreateAlloca(llvm::Type::getInt32Ty(*TheContext), nullptr, varName);
 }
 

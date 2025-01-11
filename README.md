@@ -3,9 +3,15 @@ kalang
 
 Kalang (dibaca kaleng), adalah sebuah bahasa pemrograman
 
+![alt text](image-4.png)
+
 Features:
 * Function
 * Just In Time Execution
+* Mutable variables
+* if-else
+* operators: +, -, *, <
+* Optimizations
 
 dependency: LLVM-14
 how to build:
@@ -32,3 +38,5 @@ REPL:
 File:
 
 ![alt text](image-3.png)
+
+

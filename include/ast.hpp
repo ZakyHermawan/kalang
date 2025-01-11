@@ -23,6 +23,7 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <utility>
 
 #include "token.hpp"
 
@@ -48,6 +49,8 @@ private:
   std::string m_name;
 public:
   VariableExprAST(std::string& name): m_name(name) {}
+  const std::string& getName() const { return m_name; }
+
   llvm::Value* codegen() override;
 };
 
@@ -71,6 +74,40 @@ private:
 public:
   CallExprAST(std::string& callee, std::vector<std::unique_ptr<ExprAST>> args)
     : m_callee(callee), m_args(std::move(args)) {}
+  llvm::Value* codegen() override;
+};
+
+class IfExprAST: public ExprAST
+{
+private:
+  std::unique_ptr<ExprAST> m_cond, m_then, m_else;
+public:
+  IfExprAST(std::unique_ptr<ExprAST> cond, std::unique_ptr<ExprAST> then, std::unique_ptr<ExprAST> else_)
+    : m_cond(std::move(cond)), m_then(std::move(then)), m_else(std::move(else_)) {}
+
+  llvm::Value* codegen() override;
+};
+
+class ForExprAST: public ExprAST
+{
+private:
+  std::string m_varName;
+  std::unique_ptr<ExprAST> m_start, m_end, m_step, m_body;
+
+public:
+  ForExprAST(
+    const std::string& varName,
+    std::unique_ptr<ExprAST> start,
+    std::unique_ptr<ExprAST> end,
+    std::unique_ptr<ExprAST> step,
+    std::unique_ptr<ExprAST> body
+  ):
+    m_varName(varName),
+    m_start(std::move(start)),
+    m_end(std::move(end)),
+    m_step(std::move(step)),
+    m_body(std::move(body)) {}
+
   llvm::Value* codegen() override;
 };
 
@@ -99,3 +136,18 @@ public:
   llvm::Function* codegen();
 };
 
+class VarExprAST: public ExprAST
+{
+private:
+
+  using varTypes = std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>>;
+  varTypes m_varNames;
+  std::unique_ptr<ExprAST> m_body;
+  std::unique_ptr<ExprAST> m_retVal;
+
+public:
+  VarExprAST(varTypes varNames, std::unique_ptr<ExprAST> body, std::unique_ptr<ExprAST> retVal): 
+    m_varNames(std::move(varNames)), m_body(std::move(body)), m_retVal(std::move(retVal)) {}
+
+  llvm::Value* codegen() override;
+};
